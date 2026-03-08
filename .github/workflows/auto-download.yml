@@ -5,7 +5,8 @@ on:
   schedule:
     - cron: '0 18 * * *'  # 对应北京时间 次日2:00
   workflow_dispatch:  # 保留手动触发功能
-
+permissions:
+  contents: write  # 核心：允许写入仓库内容
 jobs:
   download:
     runs-on: ubuntu-latest
