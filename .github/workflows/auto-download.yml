@@ -18,7 +18,7 @@ jobs:
           # 创建根目录的download文件夹（不存在则创建）
           mkdir -p ./download
           # 下载文件到download文件夹根目录
-          curl -s -o ./download/qilan_data.csv -L --connect-timeout 30 "https://qilan.de/api/subscription/5446fc526d8945954b9b442329da129ffec466fd36c5a2ac"
+          curl -s -o ./download/qilan_data.csv -L --connect-timeout 60 "https://qilan.de/api/subscription/5446fc526d8945954b9b442329da129ffec466fd36c5a2ac"
           # 验证文件是否下载成功
           if [ ! -s ./download/qilan_data.csv ]; then
             echo "❌ 文件下载失败或为空"
