@@ -29,7 +29,7 @@ jobs:
           VERSION_TIME_FILE="./download/version_time.txt"  # 存储最新版本时间的文件
           
           # ========== 2. 获取本次工作流运行时间（纯北京时间） ==========
-          CHECK_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
+          CHECK_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S CST')
           
           # ========== 3. 读取历史最新版本时间（无则设为"未更新"） ==========
           if [ -f "$VERSION_TIME_FILE" ] && [ -s "$VERSION_TIME_FILE" ]; then
@@ -98,7 +98,7 @@ jobs:
           fi
           
           # ========== 4. 更新版本时间（纯北京时间） ==========
-          NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
+          NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S CST')
           echo "$NEW_VERSION_TIME" > "$VERSION_TIME_FILE"
           echo "new_version_time=$NEW_VERSION_TIME" >> "$GITHUB_OUTPUT"
           echo "✅ 最新版本时间已更新为：$NEW_VERSION_TIME"
@@ -156,7 +156,7 @@ jobs:
           else
             # 提交信息使用纯北京时间
             COMMIT_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
-            git commit -m "Auto update: $COMMIT_TIME 北京时间 | Check time: ${{ steps.init.outputs.check_time }}"
+            git commit -m "Auto update: $COMMIT_TIME | Check time: ${{ steps.init.outputs.check_time }}"
             git push
             echo "✅ 所有变更已推送至仓库"
           fi
