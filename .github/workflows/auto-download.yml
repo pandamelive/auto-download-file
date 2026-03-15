@@ -21,19 +21,23 @@ jobs:
           fetch-depth: 1  # 仅拉取最新代码，提升速度
 
       - name: 创建download文件夹并下载临时文件
+        id: download_step  # 定义步骤ID，用于传递输出变量
         run: |
           # 定义变量，方便维护
           FILE_PATH="./download/qilan_data.yaml"
           TEMP_FILE="./download/qilan_data_temp.yaml"
-          CHECK_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')  # 获取当前检查时间（带时区）
+          # 获取检查时间（UTC+北京时间双显示，更友好）
+          CHECK_TIME_UTC=$(date +'%Y-%m-%d %H:%M:%S UTC')
+          CHECK_TIME_CN=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
+          CHECK_TIME="$CHECK_TIME_UTC / $CHECK_TIME_CN"
           
           # 确保download文件夹存在
           mkdir -p ./download
           echo "========================================"
-          echo "📅 检查时间：$CHECK_TIME（当前系统时区：$(date +%Z)）"
+          echo "📅 检查时间：$CHECK_TIME"
           echo "========================================"
           
-          # 下载最新文件到临时文件（增加日志、超时、重试）
+          # 下载最新文件到临时文件
           echo "📥 开始下载最新文件..."
           curl -sSL --connect-timeout 60 --max-time 120 --retry 3 \
             -o $TEMP_FILE \
@@ -42,38 +46,92 @@ jobs:
           # 验证临时文件是否下载成功
           if [ ! -f $TEMP_FILE ] || [ ! -s $TEMP_FILE ]; then
             echo "❌ 最新文件下载失败或文件为空"
-            ls -lh ./download/  # 打印文件夹内容，便于排查
-            rm -f $TEMP_FILE    # 清理临时文件
+            ls -lh ./download/
+            rm -f $TEMP_FILE
             exit 1
           fi
           echo "✅ 最新文件下载成功，临时文件大小：$(du -h $TEMP_FILE | awk '{print $1}')"
 
-          # 检查本地已有文件的最后更新时间
+          # 初始化输出变量
+          echo "check_time=$CHECK_TIME" >> $GITHUB_OUTPUT
+          echo "is_updated=false" >> $GITHUB_OUTPUT
+          echo "latest_version_time=无" >> $GITHUB_OUTPUT
+
+          # 检查本地已有文件
           if [ -f $FILE_PATH ] && [ -s $FILE_PATH ]; then
-            # 获取本地文件的最后修改时间（格式化）
-            LAST_UPDATE_TIME=$(stat -c '%Y' $FILE_PATH | xargs -I {} date -d @{} +'%Y-%m-%d %H:%M:%S')
-            echo "📜 本地文件最后更新时间：$LAST_UPDATE_TIME"
+            # 获取本地文件最后更新时间
+            LAST_UPDATE_TIMESTAMP=$(stat -c '%Y' $FILE_PATH)
+            LAST_UPDATE_TIME_CN=$(TZ='Asia/Shanghai' date -d @$LAST_UPDATE_TIMESTAMP +'%Y-%m-%d %H:%M:%S 北京时间')
+            echo "📜 本地文件最后更新时间：$LAST_UPDATE_TIME_CN"
             
-            # 对比临时文件和本地文件的内容（MD5校验，避免重复更新）
+            # MD5对比
             TEMP_MD5=$(md5sum $TEMP_FILE | awk '{print $1}')
             LOCAL_MD5=$(md5sum $FILE_PATH | awk '{print $1}')
             
             if [ "$TEMP_MD5" = "$LOCAL_MD5" ]; then
               echo "✅ 已是最新版本，无需更新"
-              rm -f $TEMP_FILE  # 清理临时文件
-              exit 0  # 正常退出，不执行后续推送步骤
+              echo "latest_version_time=$LAST_UPDATE_TIME_CN" >> $GITHUB_OUTPUT
+              rm -f $TEMP_FILE
+              exit 0
             else
               echo "🔄 检测到新版本，开始更新..."
-              # 替换本地文件
               mv -f $TEMP_FILE $FILE_PATH
+              # 获取新版本时间（当前更新时间）
+              NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
+              echo "latest_version_time=$NEW_VERSION_TIME" >> $GITHUB_OUTPUT
+              echo "is_updated=true" >> $GITHUB_OUTPUT
               echo "✅ 本次更新为最新版本，文件已替换"
             fi
           else
-            # 本地无文件或文件为空，直接使用临时文件
+            # 本地无文件，直接替换
             echo "📁 本地无有效文件，直接使用最新下载的文件"
             mv -f $TEMP_FILE $FILE_PATH
+            NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
+            echo "latest_version_time=$NEW_VERSION_TIME" >> $GITHUB_OUTPUT
+            echo "is_updated=true" >> $GITHUB_OUTPUT
             echo "✅ 本次更新为最新版本，文件已创建"
           fi
+
+      - name: 更新README文件（显示检查时间和最新版本时间）
+        run: |
+          # 定义README路径（如果你的README是README.md，无需修改；如果是其他名称，自行调整）
+          README_FILE="./README.md"
+          
+          # 提取步骤输出的变量
+          CHECK_TIME="${{ steps.download_step.outputs.check_time }}"
+          LATEST_VERSION_TIME="${{ steps.download_step.outputs.latest_version_time }}"
+          IS_UPDATED="${{ steps.download_step.outputs.is_updated }}"
+          
+          # 定义要插入的内容模板
+          STATUS_CONTENT="## 数据更新状态
+| 项目 | 时间 |
+|------|------|
+| 最后检查时间 | $CHECK_TIME |
+| 最新版本时间 | $LATEST_VERSION_TIME |
+| 本次是否更新 | $(if [ "$IS_UPDATED" = "true" ]; then echo "✅ 是"; else echo "❌ 否"; fi) |
+
+"
+          
+          # 检查README是否存在，不存在则创建
+          if [ ! -f $README_FILE ]; then
+            echo "📄 创建新的README.md文件"
+            touch $README_FILE
+          fi
+          
+          # 替换/插入更新状态内容（通过标记位定位，避免覆盖其他内容）
+          # 标记位：<!-- DATA_STATUS_START --> 和 <!-- DATA_STATUS_END -->
+          if grep -q "<!-- DATA_STATUS_START -->" $README_FILE; then
+            # 已有标记位，替换中间内容
+            sed -i "/<!-- DATA_STATUS_START -->/,/<!-- DATA_STATUS_END -->/c\\<!-- DATA_STATUS_START -->\n$STATUS_CONTENT\n<!-- DATA_STATUS_END -->" $README_FILE
+          else
+            # 无标记位，追加到文件开头
+            echo -e "$STATUS_CONTENT\n<!-- DATA_STATUS_START -->\n<!-- DATA_STATUS_END -->\n$(cat $README_FILE)" > $README_FILE
+          fi
+          
+          echo "📝 README文件已更新，更新内容："
+          echo "------------------------------"
+          echo "$STATUS_CONTENT"
+          echo "------------------------------"
 
       - name: 推送更新后的文件到仓库
         run: |
@@ -81,14 +139,14 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # 检查是否有文件变更
-          if git status --porcelain | grep -q "download/"; then
-            git add ./download/*
-            # 提交信息包含更新时间（北京时间）
+          # 检查是否有文件变更（包括download和README）
+          if git status --porcelain | grep -q -E "(download/|README.md)"; then
+            git add ./download/* $README_FILE
+            # 提交信息包含北京时间
             COMMIT_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
-            git commit -m "Auto update file: $COMMIT_TIME (Beijing Time)"
+            git commit -m "Auto update: $COMMIT_TIME (Beijing Time) | Check time: ${{ steps.download_step.outputs.check_time }}"
             git push
-            echo "✅ 更新后的文件已成功推送到仓库"
+            echo "✅ 所有更新已成功推送到仓库"
           else
             echo "ℹ️ 无文件变更，无需提交"
           fi
