@@ -1,35 +1,94 @@
 name: 定时下载文件到download文件夹
 
-# 定时规则（UTC时间，北京时间+8小时，示例：每天凌晨2点执行）
+# 定时规则（UTC时间，北京时间=UTC+8，示例：每天凌晨2点执行）
 on:
   schedule:
-    - cron: '0 18 * * *'  # 对应北京时间 次日2:00
+    - cron: '0 18 * * *'  # UTC 18:00 = 北京时间次日 2:00
   workflow_dispatch:  # 保留手动触发功能
+
 permissions:
-  contents: write  # 核心：允许写入仓库内容
+  contents: write  # 允许写入仓库内容（推送代码）
+  actions: read     # 补充基础权限，避免潜在权限问题
+
 jobs:
-  download:
+  download-file:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # 设置任务超时时间，避免卡死
     steps:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # 仅拉取最新代码，提升速度
 
-      - name: 创建download文件夹并下载文件
+      - name: 创建download文件夹并下载临时文件
         run: |
-          # 创建根目录的download文件夹（不存在则创建）
+          # 定义变量，方便维护
+          FILE_PATH="./download/qilan_data.yaml"
+          TEMP_FILE="./download/qilan_data_temp.yaml"
+          CHECK_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')  # 获取当前检查时间（带时区）
+          
+          # 确保download文件夹存在
           mkdir -p ./download
-          # 下载文件到download文件夹根目录
-          curl -s -o ./download/qilan_data.yaml -L --connect-timeout 60 "https://qilan.de/api/subscription/5446fc526d8945954b9b442329da129ffec466fd36c5a2ac"
-          # 验证文件是否下载成功
-          if [ ! -s ./download/qilan_data.yaml ]; then
-            echo "❌ 文件下载失败或为空"
+          echo "========================================"
+          echo "📅 检查时间：$CHECK_TIME（当前系统时区：$(date +%Z)）"
+          echo "========================================"
+          
+          # 下载最新文件到临时文件（增加日志、超时、重试）
+          echo "📥 开始下载最新文件..."
+          curl -sSL --connect-timeout 60 --max-time 120 --retry 3 \
+            -o $TEMP_FILE \
+            "https://qilan.de/api/subscription/5446fc526d8945954b9b442329da129ffec466fd36c5a2ac"
+          
+          # 验证临时文件是否下载成功
+          if [ ! -f $TEMP_FILE ] || [ ! -s $TEMP_FILE ]; then
+            echo "❌ 最新文件下载失败或文件为空"
+            ls -lh ./download/  # 打印文件夹内容，便于排查
+            rm -f $TEMP_FILE    # 清理临时文件
             exit 1
           fi
+          echo "✅ 最新文件下载成功，临时文件大小：$(du -h $TEMP_FILE | awk '{print $1}')"
 
-      - name: 推送文件到仓库
+          # 检查本地已有文件的最后更新时间
+          if [ -f $FILE_PATH ] && [ -s $FILE_PATH ]; then
+            # 获取本地文件的最后修改时间（格式化）
+            LAST_UPDATE_TIME=$(stat -c '%Y' $FILE_PATH | xargs -I {} date -d @{} +'%Y-%m-%d %H:%M:%S')
+            echo "📜 本地文件最后更新时间：$LAST_UPDATE_TIME"
+            
+            # 对比临时文件和本地文件的内容（MD5校验，避免重复更新）
+            TEMP_MD5=$(md5sum $TEMP_FILE | awk '{print $1}')
+            LOCAL_MD5=$(md5sum $FILE_PATH | awk '{print $1}')
+            
+            if [ "$TEMP_MD5" = "$LOCAL_MD5" ]; then
+              echo "✅ 已是最新版本，无需更新"
+              rm -f $TEMP_FILE  # 清理临时文件
+              exit 0  # 正常退出，不执行后续推送步骤
+            else
+              echo "🔄 检测到新版本，开始更新..."
+              # 替换本地文件
+              mv -f $TEMP_FILE $FILE_PATH
+              echo "✅ 本次更新为最新版本，文件已替换"
+            fi
+          else
+            # 本地无文件或文件为空，直接使用临时文件
+            echo "📁 本地无有效文件，直接使用最新下载的文件"
+            mv -f $TEMP_FILE $FILE_PATH
+            echo "✅ 本次更新为最新版本，文件已创建"
+          fi
+
+      - name: 推送更新后的文件到仓库
         run: |
+          # 配置git用户信息
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git add ./download/*
-          git commit -m "Auto update file: $(date +'%Y-%m-%d')"
-          git push
+          
+          # 检查是否有文件变更
+          if git status --porcelain | grep -q "download/"; then
+            git add ./download/*
+            # 提交信息包含更新时间（北京时间）
+            COMMIT_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
+            git commit -m "Auto update file: $COMMIT_TIME (Beijing Time)"
+            git push
+            echo "✅ 更新后的文件已成功推送到仓库"
+          else
+            echo "ℹ️ 无文件变更，无需提交"
+          fi
