@@ -27,8 +27,7 @@ jobs:
           FILE_PATH="./download/qilan_data.yaml"
           TEMP_FILE="./download/qilan_data_temp.yaml"
           
-          # ========== 修复点1：简化时间格式，避免特殊字符导致变量解析失败 ==========
-          # 获取检查时间（UTC+北京时间双显示，更友好）
+          # 简化时间格式，避免特殊字符导致变量解析失败
           CHECK_TIME_UTC=$(date +'%Y-%m-%d %H:%M:%S UTC')
           CHECK_TIME_CN=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S CST')
           CHECK_TIME="$CHECK_TIME_UTC | $CHECK_TIME_CN"
@@ -54,7 +53,7 @@ jobs:
           fi
           echo "✅ 最新文件下载成功，临时文件大小：$(du -h "$TEMP_FILE" | awk '{print $1}')"
 
-          # ========== 修复点2：初始化输出变量，避免空值 ==========
+          # 初始化输出变量，避免空值
           echo "check_time=$CHECK_TIME" >> "$GITHUB_OUTPUT"
           echo "is_updated=false" >> "$GITHUB_OUTPUT"
           echo "latest_version_time=无" >> "$GITHUB_OUTPUT"
@@ -98,7 +97,7 @@ jobs:
           # 定义README路径（如果你的README是其他名称，自行调整）
           README_FILE="./README.md"
           
-          # ========== 修复点3：安全提取输出变量，避免特殊字符 ==========
+          # 安全提取输出变量，避免特殊字符
           CHECK_TIME="${{ steps.download_step.outputs.check_time }}"
           LATEST_VERSION_TIME="${{ steps.download_step.outputs.latest_version_time }}"
           IS_UPDATED="${{ steps.download_step.outputs.is_updated }}"
@@ -110,17 +109,9 @@ jobs:
             UPDATE_STATUS="❌ 否"
           fi
           
-          # ========== 修复点4：重构README内容模板，避免sed解析错误 ==========
-          # 定义要插入的内容（使用简单格式，避免特殊符号）
-          STATUS_CONTENT=$(cat << EOF
-## 数据更新状态
-| 项目 | 时间/状态 |
-|------|-----------|
-| 最后检查时间 | $CHECK_TIME |
-| 最新版本时间 | $LATEST_VERSION_TIME |
-| 本次是否更新 | $UPDATE_STATUS |
-EOF
-          )
+          # ========== 修复核心：替换EOF多行写法，避免YAML解析错误 ==========
+          # 直接拼接字符串，而非EOF多行文本，消除YAML语法问题
+          STATUS_CONTENT="## 数据更新状态\n| 项目 | 时间/状态 |\n|------|-----------|\n| 最后检查时间 | $CHECK_TIME |\n| 最新版本时间 | $LATEST_VERSION_TIME |\n| 本次是否更新 | $UPDATE_STATUS |"
           
           # 检查README是否存在，不存在则创建
           if [ ! -f "$README_FILE" ]; then
@@ -128,17 +119,18 @@ EOF
             touch "$README_FILE"
           fi
           
-          # ========== 修复点5：重写sed替换逻辑，兼容Ubuntu的sed语法 ==========
+          # 重写sed替换逻辑，兼容Ubuntu的sed语法
           # 1. 先删除旧的标记位之间的内容（如果存在）
           sed -i '/<!-- DATA_STATUS_START -->/,/<!-- DATA_STATUS_END -->/d' "$README_FILE"
-          # 2. 在文件末尾添加新的状态内容和标记位（也可改为插入到指定位置）
+          # 2. 在文件末尾添加新的状态内容和标记位
           echo -e "\n<!-- DATA_STATUS_START -->" >> "$README_FILE"
-          echo "$STATUS_CONTENT" >> "$README_FILE"
+          # 解析换行符并写入内容
+          echo -e "$STATUS_CONTENT" >> "$README_FILE"
           echo "<!-- DATA_STATUS_END -->" >> "$README_FILE"
           
           echo "📝 README文件已更新，更新内容："
           echo "------------------------------"
-          echo "$STATUS_CONTENT"
+          echo -e "$STATUS_CONTENT"
           echo "------------------------------"
 
       - name: 推送更新后的文件到仓库
@@ -147,7 +139,7 @@ EOF
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # ========== 修复点6：优化变更检查逻辑，避免漏检 ==========
+          # 优化变更检查逻辑，避免漏检
           git add ./download/* ./README.md 2>/dev/null
           # 检查是否有提交内容
           if git diff --cached --quiet; then
