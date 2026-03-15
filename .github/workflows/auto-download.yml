@@ -26,10 +26,12 @@ jobs:
           # 定义变量，方便维护
           FILE_PATH="./download/qilan_data.yaml"
           TEMP_FILE="./download/qilan_data_temp.yaml"
+          
+          # ========== 修复点1：简化时间格式，避免特殊字符导致变量解析失败 ==========
           # 获取检查时间（UTC+北京时间双显示，更友好）
           CHECK_TIME_UTC=$(date +'%Y-%m-%d %H:%M:%S UTC')
-          CHECK_TIME_CN=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
-          CHECK_TIME="$CHECK_TIME_UTC / $CHECK_TIME_CN"
+          CHECK_TIME_CN=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S CST')
+          CHECK_TIME="$CHECK_TIME_UTC | $CHECK_TIME_CN"
           
           # 确保download文件夹存在
           mkdir -p ./download
@@ -40,93 +42,99 @@ jobs:
           # 下载最新文件到临时文件
           echo "📥 开始下载最新文件..."
           curl -sSL --connect-timeout 60 --max-time 120 --retry 3 \
-            -o $TEMP_FILE \
+            -o "$TEMP_FILE" \
             "https://qilan.de/api/subscription/5446fc526d8945954b9b442329da129ffec466fd36c5a2ac"
           
           # 验证临时文件是否下载成功
-          if [ ! -f $TEMP_FILE ] || [ ! -s $TEMP_FILE ]; then
+          if [ ! -f "$TEMP_FILE" ] || [ ! -s "$TEMP_FILE" ]; then
             echo "❌ 最新文件下载失败或文件为空"
             ls -lh ./download/
-            rm -f $TEMP_FILE
+            rm -f "$TEMP_FILE"
             exit 1
           fi
-          echo "✅ 最新文件下载成功，临时文件大小：$(du -h $TEMP_FILE | awk '{print $1}')"
+          echo "✅ 最新文件下载成功，临时文件大小：$(du -h "$TEMP_FILE" | awk '{print $1}')"
 
-          # 初始化输出变量
-          echo "check_time=$CHECK_TIME" >> $GITHUB_OUTPUT
-          echo "is_updated=false" >> $GITHUB_OUTPUT
-          echo "latest_version_time=无" >> $GITHUB_OUTPUT
+          # ========== 修复点2：初始化输出变量，避免空值 ==========
+          echo "check_time=$CHECK_TIME" >> "$GITHUB_OUTPUT"
+          echo "is_updated=false" >> "$GITHUB_OUTPUT"
+          echo "latest_version_time=无" >> "$GITHUB_OUTPUT"
 
           # 检查本地已有文件
-          if [ -f $FILE_PATH ] && [ -s $FILE_PATH ]; then
+          if [ -f "$FILE_PATH" ] && [ -s "$FILE_PATH" ]; then
             # 获取本地文件最后更新时间
-            LAST_UPDATE_TIMESTAMP=$(stat -c '%Y' $FILE_PATH)
-            LAST_UPDATE_TIME_CN=$(TZ='Asia/Shanghai' date -d @$LAST_UPDATE_TIMESTAMP +'%Y-%m-%d %H:%M:%S 北京时间')
+            LAST_UPDATE_TIMESTAMP=$(stat -c '%Y' "$FILE_PATH")
+            LAST_UPDATE_TIME_CN=$(TZ='Asia/Shanghai' date -d @"$LAST_UPDATE_TIMESTAMP" +'%Y-%m-%d %H:%M:%S CST')
             echo "📜 本地文件最后更新时间：$LAST_UPDATE_TIME_CN"
             
             # MD5对比
-            TEMP_MD5=$(md5sum $TEMP_FILE | awk '{print $1}')
-            LOCAL_MD5=$(md5sum $FILE_PATH | awk '{print $1}')
+            TEMP_MD5=$(md5sum "$TEMP_FILE" | awk '{print $1}')
+            LOCAL_MD5=$(md5sum "$FILE_PATH" | awk '{print $1}')
             
             if [ "$TEMP_MD5" = "$LOCAL_MD5" ]; then
               echo "✅ 已是最新版本，无需更新"
-              echo "latest_version_time=$LAST_UPDATE_TIME_CN" >> $GITHUB_OUTPUT
-              rm -f $TEMP_FILE
-              exit 0
+              echo "latest_version_time=$LAST_UPDATE_TIME_CN" >> "$GITHUB_OUTPUT"
+              rm -f "$TEMP_FILE"
             else
               echo "🔄 检测到新版本，开始更新..."
-              mv -f $TEMP_FILE $FILE_PATH
+              mv -f "$TEMP_FILE" "$FILE_PATH"
               # 获取新版本时间（当前更新时间）
-              NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
-              echo "latest_version_time=$NEW_VERSION_TIME" >> $GITHUB_OUTPUT
-              echo "is_updated=true" >> $GITHUB_OUTPUT
+              NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S CST')
+              echo "latest_version_time=$NEW_VERSION_TIME" >> "$GITHUB_OUTPUT"
+              echo "is_updated=true" >> "$GITHUB_OUTPUT"
               echo "✅ 本次更新为最新版本，文件已替换"
             fi
           else
             # 本地无文件，直接替换
             echo "📁 本地无有效文件，直接使用最新下载的文件"
-            mv -f $TEMP_FILE $FILE_PATH
-            NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S 北京时间')
-            echo "latest_version_time=$NEW_VERSION_TIME" >> $GITHUB_OUTPUT
-            echo "is_updated=true" >> $GITHUB_OUTPUT
+            mv -f "$TEMP_FILE" "$FILE_PATH"
+            NEW_VERSION_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S CST')
+            echo "latest_version_time=$NEW_VERSION_TIME" >> "$GITHUB_OUTPUT"
+            echo "is_updated=true" >> "$GITHUB_OUTPUT"
             echo "✅ 本次更新为最新版本，文件已创建"
           fi
 
       - name: 更新README文件（显示检查时间和最新版本时间）
         run: |
-          # 定义README路径（如果你的README是README.md，无需修改；如果是其他名称，自行调整）
+          # 定义README路径（如果你的README是其他名称，自行调整）
           README_FILE="./README.md"
           
-          # 提取步骤输出的变量
+          # ========== 修复点3：安全提取输出变量，避免特殊字符 ==========
           CHECK_TIME="${{ steps.download_step.outputs.check_time }}"
           LATEST_VERSION_TIME="${{ steps.download_step.outputs.latest_version_time }}"
           IS_UPDATED="${{ steps.download_step.outputs.is_updated }}"
           
-          # 定义要插入的内容模板
-          STATUS_CONTENT="## 数据更新状态
-| 项目 | 时间 |
-|------|------|
+          # 处理"本次是否更新"的显示文本
+          if [ "$IS_UPDATED" = "true" ]; then
+            UPDATE_STATUS="✅ 是"
+          else
+            UPDATE_STATUS="❌ 否"
+          fi
+          
+          # ========== 修复点4：重构README内容模板，避免sed解析错误 ==========
+          # 定义要插入的内容（使用简单格式，避免特殊符号）
+          STATUS_CONTENT=$(cat << EOF
+## 数据更新状态
+| 项目 | 时间/状态 |
+|------|-----------|
 | 最后检查时间 | $CHECK_TIME |
 | 最新版本时间 | $LATEST_VERSION_TIME |
-| 本次是否更新 | $(if [ "$IS_UPDATED" = "true" ]; then echo "✅ 是"; else echo "❌ 否"; fi) |
-
-"
+| 本次是否更新 | $UPDATE_STATUS |
+EOF
+          )
           
           # 检查README是否存在，不存在则创建
-          if [ ! -f $README_FILE ]; then
+          if [ ! -f "$README_FILE" ]; then
             echo "📄 创建新的README.md文件"
-            touch $README_FILE
+            touch "$README_FILE"
           fi
           
-          # 替换/插入更新状态内容（通过标记位定位，避免覆盖其他内容）
-          # 标记位：<!-- DATA_STATUS_START --> 和 <!-- DATA_STATUS_END -->
-          if grep -q "<!-- DATA_STATUS_START -->" $README_FILE; then
-            # 已有标记位，替换中间内容
-            sed -i "/<!-- DATA_STATUS_START -->/,/<!-- DATA_STATUS_END -->/c\\<!-- DATA_STATUS_START -->\n$STATUS_CONTENT\n<!-- DATA_STATUS_END -->" $README_FILE
-          else
-            # 无标记位，追加到文件开头
-            echo -e "$STATUS_CONTENT\n<!-- DATA_STATUS_START -->\n<!-- DATA_STATUS_END -->\n$(cat $README_FILE)" > $README_FILE
-          fi
+          # ========== 修复点5：重写sed替换逻辑，兼容Ubuntu的sed语法 ==========
+          # 1. 先删除旧的标记位之间的内容（如果存在）
+          sed -i '/<!-- DATA_STATUS_START -->/,/<!-- DATA_STATUS_END -->/d' "$README_FILE"
+          # 2. 在文件末尾添加新的状态内容和标记位（也可改为插入到指定位置）
+          echo -e "\n<!-- DATA_STATUS_START -->" >> "$README_FILE"
+          echo "$STATUS_CONTENT" >> "$README_FILE"
+          echo "<!-- DATA_STATUS_END -->" >> "$README_FILE"
           
           echo "📝 README文件已更新，更新内容："
           echo "------------------------------"
@@ -139,14 +147,15 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # 检查是否有文件变更（包括download和README）
-          if git status --porcelain | grep -q -E "(download/|README.md)"; then
-            git add ./download/* $README_FILE
+          # ========== 修复点6：优化变更检查逻辑，避免漏检 ==========
+          git add ./download/* ./README.md 2>/dev/null
+          # 检查是否有提交内容
+          if git diff --cached --quiet; then
+            echo "ℹ️ 无文件变更，无需提交"
+          else
             # 提交信息包含北京时间
             COMMIT_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
-            git commit -m "Auto update: $COMMIT_TIME (Beijing Time) | Check time: ${{ steps.download_step.outputs.check_time }}"
+            git commit -m "Auto update: $COMMIT_TIME (CST) | Check time: ${{ steps.download_step.outputs.check_time }}"
             git push
             echo "✅ 所有更新已成功推送到仓库"
-          else
-            echo "ℹ️ 无文件变更，无需提交"
           fi
