@@ -105,11 +105,12 @@ jobs:
 
       - name: 更新README文件（统一北京时间展示）
         run: |
-          # 读取所有关键变量（增加默认值，避免变量为空报错）
+          # ========== 核心修复：修正变量引用格式 ==========
+          # 读取所有关键变量（正确引用GitHub Actions输出变量，增加默认值）
           CHECK_TIME="${{ steps.init.outputs.check_time || '未知时间（北京时间）' }}"
           IS_UPDATED="${{ steps.download.outputs.is_updated || 'false' }}"
           LAST_VERSION_TIME="${{ steps.init.outputs.last_version_time || '未更新' }}"
-          NEW_VERSION_TIME="${{ steps.download.outputs.new_version_time || LAST_VERSION_TIME }}"
+          NEW_VERSION_TIME="${{ steps.download.outputs.new_version_time || steps.init.outputs.last_version_time || '未更新' }}"
           
           # 确定最终显示的最新版本时间
           if [ "$IS_UPDATED" = "true" ]; then
