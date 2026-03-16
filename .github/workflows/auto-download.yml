@@ -3,7 +3,7 @@ name: 定时下载文件到download文件夹
 # 定时规则（UTC时间，北京时间=UTC+8，示例：每天凌晨2点执行）
 on:
   schedule:
-    - cron: '0 * * * *'  
+    - cron: '13 * * * *'  
   workflow_dispatch:  # 保留手动触发功能
 
 permissions:
